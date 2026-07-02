@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kris Collage — 相片拼貼</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,400;1,500;1,600&family=Noto+Serif+JP:wght@400;500&family=Montserrat:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #101014;
+    --panel: #1a1a20;
+    --panel2: #22222a;
+    --text: #ececf0;
+    --muted: #9a9aa5;
+    --accent: #e8b04b;
+    --border: #2e2e38;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 18px 24px 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+  header h1 em { font-family: "Playfair Display", serif; color: var(--accent); font-weight: 600; }
+  header span { color: var(--muted); font-size: 12.5px; }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 20px;
+    padding: 14px 24px 40px;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  .stage {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  #preview {
+    max-width: 100%;
+    max-height: calc(100vh - 130px);
+    border-radius: 6px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    touch-action: none;
+    cursor: grab;
+    background: #000;
+  }
+  .controls { display: flex; flex-direction: column; gap: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .card h2 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
+  .row label { font-size: 13px; flex: 0 0 84px; color: var(--text); }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg button {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .seg button.active { color: #111; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .uploads { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .upl {
+    position: relative;
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
+    min-height: 66px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    cursor: pointer;
+    overflow: hidden;
+    background: var(--panel2);
+    transition: border-color .15s;
+  }
+  .upl:hover { border-color: var(--accent); }
+  .upl input { display: none; }
+  .upl .lbl { font-size: 12.5px; color: var(--text); z-index: 2; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  .upl .hint { font-size: 10.5px; color: var(--muted); z-index: 2; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  .upl img.thumb {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; opacity: 0.55;
+  }
+  .upl.filled { border-style: solid; }
+  input[type=text] {
+    flex: 1;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text);
+    padding: 7px 10px;
+    font-size: 13.5px;
+    min-width: 0;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  input[type=range] { flex: 1; accent-color: var(--accent); min-width: 0; }
+  .btns { display: flex; gap: 8px; }
+  .btn {
+    flex: 1;
+    border: none;
+    border-radius: 9px;
+    padding: 11px 10px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .btn.primary { background: var(--accent); color: #16120a; }
+  .btn.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .note { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
+  #resinfo { font-size: 11.5px; color: var(--muted); margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1><em>Kris</em> Collage</h1>
+  <span>相片拼貼 · 原畫質輸出</span>
+</header>
+
+<div class="layout">
+  <div class="stage">
+    <div style="width:100%;display:flex;flex-direction:column;align-items:center">
+      <canvas id="preview"></canvas>
+      <div id="resinfo"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="card">
+      <h2>版式</h2>
+      <div class="row">
+        <label>模式</label>
+        <div class="seg" id="modeSeg">
+          <button data-mode="double" class="active">上下雙圖</button>
+          <button data-mode="single">單圖</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>比例</label>
+        <div class="seg" id="ratioSeg">
+          <button data-ratio="1.25" class="active">4:5</button>
+          <button data-ratio="1">1:1</button>
+          <button data-ratio="1.3333">3:4</button>
+          <button data-ratio="1.7778">9:16</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>照片</h2>
+      <div class="uploads">
+        <label class="upl" id="upl-bgTop">
+          <input type="file" accept="image/*" data-slot="bgTop">
+          <span class="lbl">上方背景</span><span class="hint">點擊上傳</span>
+        </label>
+        <label class="upl" id="upl-insetTop">
+          <input type="file" accept="image/*" data-slot="insetTop">
+          <span class="lbl">上方小圖</span><span class="hint">點擊上傳</span>
+        </label>
+        <label class="upl" id="upl-bgBottom">
+          <input type="file" accept="image/*" data-slot="bgBottom">
+          <span class="lbl">下方背景</span><span class="hint">點擊上傳</span>
+        </label>
+        <label class="upl" id="upl-insetBottom">
+          <input type="file" accept="image/*" data-slot="insetBottom">
+          <span class="lbl">下方小圖</span><span class="hint">點擊上傳</span>
+        </label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label>小圖大小</label>
+        <input type="range" id="insetSize" min="0.18" max="0.6" step="0.005" value="0.34">
+      </div>
+      <div class="row">
+        <label>小圖陰影</label>
+        <input type="range" id="insetShadow" min="0" max="1" step="0.05" value="0.45">
+      </div>
+      <div class="note">直接在預覽圖上<b>拖曳</b>：拖小圖可移動位置，拖背景可調整取景。</div>
+    </div>
+
+    <div class="card">
+      <h2>文字</h2>
+      <div class="row"><label>日文小標</label><input type="text" id="txtSub" value="秋色に包まれた"></div>
+      <div class="row"><label>主標題</label><input type="text" id="txtTitle" value="Japan Gold Film"></div>
+      <div class="row"><label>下標籤</label><input type="text" id="txtLabel" value="JAPAN VOL.2"></div>
+      <div class="row"><label>標題大小</label><input type="range" id="titleSize" min="0.04" max="0.13" step="0.002" value="0.078"></div>
+      <div class="row"><label>文字位置</label><input type="range" id="textY" min="0.1" max="0.92" step="0.005" value="0.49"></div>
+      <div class="note">留空即可隱藏該行文字。</div>
+    </div>
+
+    <div class="card">
+      <h2>輸出</h2>
+      <div class="btns">
+        <button class="btn primary" id="dlJpg" disabled>下載 JPEG</button>
+        <button class="btn ghost" id="dlPng" disabled>下載 PNG（無損）</button>
+      </div>
+      <div class="note">輸出解析度以背景原圖的像素為準：背景不縮小、不放大、1:1 對應原圖像素，畫質不打折。JPEG 以 97% 品質儲存；PNG 完全無損但檔案較大。</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const state = {
+    mode: 'double',           // 'double' | 'single'
+    ratio: 1.25,              // height / width
+    insetScale: 0.34,         // inset width as fraction of canvas width
+    insetShadow: 0.45,
+    text: { sub: '秋色に包まれた', title: 'Japan Gold Film', label: 'JAPAN VOL.2', y: 0.49, titleSize: 0.078 },
+    slots: {
+      bgTop:       { img: null, panX: 0.5, panY: 0.5 },
+      bgBottom:    { img: null, panX: 0.5, panY: 0.5 },
+      insetTop:    { img: null, cx: 0.5, cy: 0.28 },   // cx: fraction of width, cy: fraction of height
+      insetBottom: { img: null, cx: 0.5, cy: 0.72 },
+    },
+  };
+
+  const preview = document.getElementById('preview');
+  const resinfo = document.getElementById('resinfo');
+
+  function activeBgSlots() {
+    return state.mode === 'double' ? ['bgTop', 'bgBottom'] : ['bgTop'];
+  }
+  function activeInsetSlots() {
+    return state.mode === 'double' ? ['insetTop', 'insetBottom'] : ['insetTop'];
+  }
+
+  // rect of a background slot as fractions of the canvas (x, y, w, h in 0..1 of W / H)
+  function bgRect(slot) {
+    if (state.mode === 'single') return { x: 0, y: 0, w: 1, h: 1 };
+    return slot === 'bgTop'
+      ? { x: 0, y: 0,   w: 1, h: 0.5 }
+      : { x: 0, y: 0.5, w: 1, h: 0.5 };
+  }
+
+  // source crop for cover-fit of img into a dw x dh box (px), honoring pan
+  function coverCrop(img, dw, dh, panX, panY) {
+    const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
+    const cw = dw / scale, ch = dh / scale;
+    return {
+      sx: (img.naturalWidth - cw) * panX,
+      sy: (img.naturalHeight - ch) * panY,
+      sw: cw, sh: ch, scale,
+    };
+  }
+
+  // high-quality drawImage: iterative half-scaling when shrinking a lot,
+  // so downsized insets stay sharp instead of aliased
+  function drawImageHQ(ctx, img, sx, sy, sw, sh, dx, dy, dw, dh) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    if (dw >= sw * 0.5) {
+      ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+      return;
+    }
+    let cur = img, cx = sx, cy = sy, cw = sw, ch = sh;
+    while (cw * 0.5 > dw) {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(cw / 2));
+      c.height = Math.max(1, Math.round(ch / 2));
+      const cc = c.getContext('2d');
+      cc.imageSmoothingEnabled = true;
+      cc.imageSmoothingQuality = 'high';
+      cc.drawImage(cur, cx, cy, cw, ch, 0, 0, c.width, c.height);
+      cur = c; cx = 0; cy = 0; cw = c.width; ch = c.height;
+    }
+    ctx.drawImage(cur, cx, cy, cw, ch, dx, dy, dw, dh);
+  }
+
+  // centered text with manual letter-spacing (canvas letterSpacing isn't universal)
+  function drawSpacedText(ctx, text, cxPx, yPx, spacingPx) {
+    const chars = [...text];
+    let total = 0;
+    const widths = chars.map(c => { const w = ctx.measureText(c).width; total += w; return w; });
+    total += spacingPx * Math.max(0, chars.length - 1);
+    let x = cxPx - total / 2;
+    const prevAlign = ctx.textAlign;
+    ctx.textAlign = 'left';
+    chars.forEach((c, i) => { ctx.fillText(c, x, yPx); x += widths[i] + spacingPx; });
+    ctx.textAlign = prevAlign;
+  }
+
+  function render(canvas, W) {
+    const H = Math.round(W * state.ratio);
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
+    // backgrounds
+    for (const slot of activeBgSlots()) {
+      const s = state.slots[slot];
+      const r = bgRect(slot);
+      const dx = r.x * W, dy = r.y * H, dw = r.w * W, dh = r.h * H;
+      if (s.img) {
+        const c = coverCrop(s.img, dw, dh, s.panX, s.panY);
+        drawImageHQ(ctx, s.img, c.sx, c.sy, c.sw, c.sh, dx, dy, dw, dh);
+      } else {
+        ctx.fillStyle = slot === 'bgTop' ? '#26262e' : '#1d1d24';
+        ctx.fillRect(dx, dy, dw, dh);
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.font = `${Math.round(W * 0.028)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+          slot === 'bgTop'
+            ? (state.mode === 'double' ? '↑ 上傳上方背景照片' : '↑ 上傳背景照片')
+            : '↓ 上傳下方背景照片',
+          dx + dw / 2, dy + dh / 2
+        );
+      }
+    }
+
+    // insets
+    for (const slot of activeInsetSlots()) {
+      const s = state.slots[slot];
+      if (!s.img) continue;
+      const iw = W * state.insetScale;
+      const ih = iw * s.img.naturalHeight / s.img.naturalWidth;
+      const x = s.cx * W - iw / 2;
+      const y = s.cy * H - ih / 2;
+      if (state.insetShadow > 0) {
+        ctx.save();
+        ctx.shadowColor = `rgba(0,0,0,${0.55 * state.insetShadow})`;
+        ctx.shadowBlur = W * 0.03 * state.insetShadow;
+        ctx.shadowOffsetY = W * 0.006 * state.insetShadow;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(x, y, iw, ih);
+        ctx.restore();
+      }
+      drawImageHQ(ctx, s.img, 0, 0, s.img.naturalWidth, s.img.naturalHeight, x, y, iw, ih);
+    }
+
+    // text block
+    const t = state.text;
+    if (t.sub || t.title || t.label) {
+      const cx = W / 2;
+      const baseY = t.y * H;
+      const titlePx = W * t.titleSize;
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'alphabetic';
+      ctx.shadowColor = 'rgba(0,0,0,0.45)';
+      ctx.shadowBlur = W * 0.008;
+      ctx.shadowOffsetY = W * 0.001;
+      if (t.sub) {
+        const px = W * 0.021;
+        ctx.font = `500 ${px}px "Noto Serif JP", serif`;
+        drawSpacedText(ctx, t.sub, cx, baseY - titlePx * 0.72, px * 0.38);
+      }
+      if (t.title) {
+        ctx.font = `italic 500 ${titlePx}px "Playfair Display", serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(t.title, cx, baseY + titlePx * 0.28);
+      }
+      if (t.label) {
+        const px = W * 0.0165;
+        ctx.font = `600 ${px}px "Montserrat", sans-serif`;
+        drawSpacedText(ctx, t.label.toUpperCase(), cx, baseY + titlePx * 0.72, px * 0.45);
+      }
+      ctx.restore();
+    }
+  }
+
+  function previewRenderWidth() {
+    const cssW = preview.clientWidth || 720;
+    return Math.min(1080, Math.max(540, Math.round(cssW * (window.devicePixelRatio || 1))));
+  }
+
+  let raf = null;
+  function schedule() {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = null;
+      render(preview, previewRenderWidth());
+      updateResInfo();
+    });
+  }
+
+  // canvas width at which every used background maps 1:1 (or better) to source pixels
+  function exportWidth() {
+    let maxW = 0;
+    for (const slot of activeBgSlots()) {
+      const img = state.slots[slot].img;
+      if (!img) continue;
+      const r = bgRect(slot);
+      const boxAspect = (r.w) / (r.h * state.ratio); // box width / box height in px terms
+      const imgAspect = img.naturalWidth / img.naturalHeight;
+      let w;
+      if (imgAspect > boxAspect) {
+        // cover uses the full source height; box height (r.h * ratio * W) = naturalHeight
+        w = img.naturalHeight / (r.h * state.ratio);
+      } else {
+        // cover uses the full source width; box width (r.w * W) = naturalWidth
+        w = img.naturalWidth / r.w;
+      }
+      maxW = Math.max(maxW, w);
+    }
+    if (!maxW) maxW = 2160;
+    return Math.min(6400, Math.round(maxW));
+  }
+
+  function updateResInfo() {
+    const hasBg = activeBgSlots().some(s => state.slots[s].img);
+    const w = exportWidth();
+    const h = Math.round(w * state.ratio);
+    resinfo.textContent = hasBg ? `輸出尺寸：${w} × ${h} px` : '尚未上傳背景照片';
+    document.getElementById('dlJpg').disabled = !hasBg;
+    document.getElementById('dlPng').disabled = !hasBg;
+  }
+
+  function download(type) {
+    const c = document.createElement('canvas');
+    render(c, exportWidth());
+    const ext = type === 'image/png' ? 'png' : 'jpg';
+    c.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `kris_collage_${Date.now()}.${ext}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }, type, 0.97);
+  }
+  document.getElementById('dlJpg').addEventListener('click', () => download('image/jpeg'));
+  document.getElementById('dlPng').addEventListener('click', () => download('image/png'));
+
+  // ---------- uploads ----------
+
+  function setImage(slot, img, thumbUrl) {
+    state.slots[slot].img = img;
+    const upl = document.getElementById('upl-' + slot);
+    if (upl) {
+      upl.classList.add('filled');
+      let th = upl.querySelector('img.thumb');
+      if (!th) { th = document.createElement('img'); th.className = 'thumb'; upl.prepend(th); }
+      th.src = thumbUrl;
+      upl.querySelector('.hint').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+    }
+    schedule();
+  }
+  window._setImage = setImage; // exposed for automated testing
+
+  document.querySelectorAll('.upl input[type=file]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const file = inp.files && inp.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => setImage(inp.dataset.slot, img, url);
+      img.src = url;
+    });
+  });
+
+  // ---------- controls ----------
+
+  function segWire(id, apply) {
+    const seg = document.getElementById(id);
+    seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      apply(b.dataset);
+      schedule();
+    }));
+  }
+  segWire('modeSeg', d => { state.mode = d.mode; });
+  segWire('ratioSeg', d => { state.ratio = parseFloat(d.ratio); });
+
+  const wire = (id, fn) => document.getElementById(id).addEventListener('input', e => { fn(e.target.value); schedule(); });
+  wire('insetSize', v => state.insetScale = parseFloat(v));
+  wire('insetShadow', v => state.insetShadow = parseFloat(v));
+  wire('txtSub', v => state.text.sub = v);
+  wire('txtTitle', v => state.text.title = v);
+  wire('txtLabel', v => state.text.label = v);
+  wire('titleSize', v => state.text.titleSize = parseFloat(v));
+  wire('textY', v => state.text.y = parseFloat(v));
+
+  // ---------- drag interactions on preview ----------
+
+  let drag = null;
+
+  function pointerFrac(e) {
+    const r = preview.getBoundingClientRect();
+    return {
+      fx: (e.clientX - r.left) / r.width,
+      fy: (e.clientY - r.top) / r.height,
+    };
+  }
+
+  function hitInset(p) {
+    const slots = activeInsetSlots().slice().reverse();
+    for (const slot of slots) {
+      const s = state.slots[slot];
+      if (!s.img) continue;
+      const iw = state.insetScale; // fraction of width
+      const ihFrac = (iw * s.img.naturalHeight / s.img.naturalWidth) / state.ratio; // fraction of height
+      if (Math.abs(p.fx - s.cx) <= iw / 2 && Math.abs(p.fy - s.cy) <= ihFrac / 2) return slot;
+    }
+    return null;
+  }
+
+  function hitBg(p) {
+    if (state.mode === 'single') return state.slots.bgTop.img ? 'bgTop' : null;
+    const slot = p.fy < 0.5 ? 'bgTop' : 'bgBottom';
+    return state.slots[slot].img ? slot : null;
+  }
+
+  preview.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const p = pointerFrac(e);
+    const inset = hitInset(p);
+    if (inset) {
+      drag = { kind: 'inset', slot: inset, lastFx: p.fx, lastFy: p.fy };
+    } else {
+      const bg = hitBg(p);
+      if (bg) drag = { kind: 'bg', slot: bg, lastX: e.clientX, lastY: e.clientY };
+    }
+    if (drag) preview.setPointerCapture(e.pointerId);
+  });
+
+  preview.addEventListener('pointermove', e => {
+    if (!drag) return;
+    if (drag.kind === 'inset') {
+      const p = pointerFrac(e);
+      const s = state.slots[drag.slot];
+      s.cx = Math.min(0.98, Math.max(0.02, s.cx + (p.fx - drag.lastFx)));
+      s.cy = Math.min(0.98, Math.max(0.02, s.cy + (p.fy - drag.lastFy)));
+      drag.lastFx = p.fx; drag.lastFy = p.fy;
+    } else {
+      const s = state.slots[drag.slot];
+      const img = s.img;
+      const r = bgRect(drag.slot);
+      const rect = preview.getBoundingClientRect();
+      const dw = r.w * rect.width, dh = r.h * rect.height; // css px of the bg box
+      const c = coverCrop(img, dw, dh, s.panX, s.panY);
+      const dxSrc = (e.clientX - drag.lastX) / c.scale;
+      const dySrc = (e.clientY - drag.lastY) / c.scale;
+      const slackX = img.naturalWidth - c.sw;
+      const slackY = img.naturalHeight - c.sh;
+      if (slackX > 1) s.panX = Math.min(1, Math.max(0, s.panX - dxSrc / slackX));
+      if (slackY > 1) s.panY = Math.min(1, Math.max(0, s.panY - dySrc / slackY));
+      drag.lastX = e.clientX; drag.lastY = e.clientY;
+    }
+    schedule();
+  });
+
+  const endDrag = () => { drag = null; };
+  preview.addEventListener('pointerup', endDrag);
+  preview.addEventListener('pointercancel', endDrag);
+
+  // ---------- init ----------
+
+  window.addEventListener('resize', schedule);
+
+  schedule();
+  // repaint once webfonts land so canvas text uses them
+  if (document.fonts && document.fonts.ready) {
+    Promise.all([
+      document.fonts.load('italic 500 64px "Playfair Display"'),
+      document.fonts.load('500 20px "Noto Serif JP" ', '秋色に包まれた'),
+      document.fonts.load('600 16px "Montserrat"'),
+    ]).then(schedule).catch(() => {});
+    document.fonts.ready.then(schedule);
+  }
+})();
+</script>
+</body>
+</html>
