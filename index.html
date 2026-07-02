@@ -42,7 +42,7 @@
     margin: 0 auto;
   }
   @media (max-width: 900px) {
-    .layout { grid-template-columns: 1fr; }
+    .layout { grid-template-columns: 1fr; padding: 12px 14px 40px; }
   }
   .stage {
     display: flex;
@@ -139,6 +139,16 @@
   .btn:disabled { opacity: .4; cursor: not-allowed; }
   .note { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
   #resinfo { font-size: 11.5px; color: var(--muted); margin-top: 6px; text-align: center; }
+  #saveOverlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(0,0,0,.88);
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 20px;
+  }
+  #saveOverlay img { max-width: 92%; max-height: 68vh; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+  #saveOverlay .tip { color: #fff; font-size: 14.5px; text-align: center; line-height: 1.6; }
+  #saveOverlay button { flex: 0 0 auto; padding: 10px 28px; }
 </style>
 </head>
 <body>
@@ -181,30 +191,30 @@
       <div class="uploads">
         <label class="upl" id="upl-bgTop">
           <input type="file" accept="image/*" data-slot="bgTop">
-          <span class="lbl">上方背景</span><span class="hint">點擊上傳</span>
-        </label>
-        <label class="upl" id="upl-insetTop">
-          <input type="file" accept="image/*" data-slot="insetTop">
-          <span class="lbl">上方小圖</span><span class="hint">點擊上傳</span>
+          <span class="lbl">上方照片</span><span class="hint">點擊上傳</span>
         </label>
         <label class="upl" id="upl-bgBottom">
           <input type="file" accept="image/*" data-slot="bgBottom">
-          <span class="lbl">下方背景</span><span class="hint">點擊上傳</span>
+          <span class="lbl">下方照片</span><span class="hint">點擊上傳</span>
         </label>
-        <label class="upl" id="upl-insetBottom">
-          <input type="file" accept="image/*" data-slot="insetBottom">
-          <span class="lbl">下方小圖</span><span class="hint">點擊上傳</span>
+        <label class="upl" id="upl-insetSingle" style="display:none">
+          <input type="file" accept="image/*" data-slot="insetSingle">
+          <span class="lbl">小圖</span><span class="hint">點擊上傳</span>
         </label>
       </div>
       <div class="row" style="margin-top:10px">
         <label>小圖大小</label>
         <input type="range" id="insetSize" min="0.18" max="0.6" step="0.005" value="0.34">
       </div>
+      <div class="row" id="rowAspect">
+        <label>小圖長寬</label>
+        <input type="range" id="insetAspect" min="0.7" max="1.5" step="0.01" value="1.15">
+      </div>
       <div class="row">
         <label>小圖陰影</label>
         <input type="range" id="insetShadow" min="0" max="1" step="0.05" value="0.45">
       </div>
-      <div class="note">直接在預覽圖上<b>拖曳</b>：拖小圖可移動位置，拖背景可調整取景。</div>
+      <div class="note" id="photoNote">雙圖模式只需上傳兩張照片：上方小圖自動顯示「下方照片被小圖遮住的部分」，下方小圖則顯示「上方照片被遮住的部分」——每張小圖搭配另一半的大圖，都能拼回完整原照。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。</div>
     </div>
 
     <div class="card">
@@ -220,12 +230,18 @@
     <div class="card">
       <h2>輸出</h2>
       <div class="btns">
-        <button class="btn primary" id="dlJpg" disabled>下載 JPEG</button>
-        <button class="btn ghost" id="dlPng" disabled>下載 PNG（無損）</button>
+        <button class="btn primary" id="dlJpg" disabled>儲存 JPEG</button>
+        <button class="btn ghost" id="dlPng" disabled>儲存 PNG（無損）</button>
       </div>
-      <div class="note">輸出解析度以背景原圖的像素為準：背景不縮小、不放大、1:1 對應原圖像素，畫質不打折。JPEG 以 97% 品質儲存；PNG 完全無損但檔案較大。</div>
+      <div class="note">輸出解析度以背景原圖的像素為準，畫質不打折。手機上會開啟分享面板，選「儲存影像」即可直接存進相簿；電腦上則直接下載檔案。</div>
     </div>
   </div>
+</div>
+
+<div id="saveOverlay">
+  <img id="saveImg" alt="collage">
+  <div class="tip">長按上方圖片 → 「加入照片」即可儲存到相簿</div>
+  <button class="btn ghost" id="saveClose">關閉</button>
 </div>
 
 <script>
@@ -236,32 +252,50 @@
     mode: 'double',           // 'double' | 'single'
     ratio: 1.25,              // height / width
     insetScale: 0.34,         // inset width as fraction of canvas width
+    insetAspect: 1.15,        // inset height / width (double-mode windows)
     insetShadow: 0.45,
     text: { sub: '秋色に包まれた', title: 'Japan Gold Film', label: 'JAPAN VOL.2', y: 0.49, titleSize: 0.078 },
     slots: {
       bgTop:       { img: null, panX: 0.5, panY: 0.5 },
       bgBottom:    { img: null, panX: 0.5, panY: 0.5 },
-      insetTop:    { img: null, cx: 0.5, cy: 0.28 },   // cx: fraction of width, cy: fraction of height
-      insetBottom: { img: null, cx: 0.5, cy: 0.72 },
+      insetTop:    { cx: 0.5, cy: 0.28 },              // window into bgBottom
+      insetBottom: { cx: 0.5, cy: 0.72 },              // window into bgTop
+      insetSingle: { img: null, cx: 0.5, cy: 0.40 },   // manual inset (single mode)
     },
   };
 
   const preview = document.getElementById('preview');
   const resinfo = document.getElementById('resinfo');
 
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   function activeBgSlots() {
     return state.mode === 'double' ? ['bgTop', 'bgBottom'] : ['bgTop'];
   }
   function activeInsetSlots() {
-    return state.mode === 'double' ? ['insetTop', 'insetBottom'] : ['insetTop'];
+    return state.mode === 'double' ? ['insetTop', 'insetBottom'] : ['insetSingle'];
   }
 
-  // rect of a background slot as fractions of the canvas (x, y, w, h in 0..1 of W / H)
+  // rect of a background slot as fractions of the canvas
   function bgRect(slot) {
     if (state.mode === 'single') return { x: 0, y: 0, w: 1, h: 1 };
     return slot === 'bgTop'
       ? { x: 0, y: 0,   w: 1, h: 0.5 }
       : { x: 0, y: 0.5, w: 1, h: 0.5 };
+  }
+
+  // display rect (px) of an inset on a W x H canvas
+  function insetRect(slot, W, H) {
+    const s = state.slots[slot];
+    let iw = W * state.insetScale, ih;
+    if (slot === 'insetSingle') {
+      if (!s.img) return null;
+      ih = iw * s.img.naturalHeight / s.img.naturalWidth;
+    } else {
+      ih = iw * state.insetAspect;
+    }
+    return { x: s.cx * W - iw / 2, y: s.cy * H - ih / 2, w: iw, h: ih };
   }
 
   // source crop for cover-fit of img into a dw x dh box (px), honoring pan
@@ -275,8 +309,7 @@
     };
   }
 
-  // high-quality drawImage: iterative half-scaling when shrinking a lot,
-  // so downsized insets stay sharp instead of aliased
+  // high-quality drawImage: iterative half-scaling when shrinking a lot
   function drawImageHQ(ctx, img, sx, sy, sw, sh, dx, dy, dw, dh) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -296,6 +329,16 @@
       cur = c; cx = 0; cy = 0; cw = c.width; ch = c.height;
     }
     ctx.drawImage(cur, cx, cy, cw, ch, dx, dy, dw, dh);
+  }
+
+  // drawImageHQ with the source rect clamped to the image bounds
+  function drawWindow(ctx, img, sx, sy, sw, sh, dx, dy, dw, dh) {
+    const kx = dw / sw, ky = dh / sh;
+    const nsx = Math.max(0, sx), nsy = Math.max(0, sy);
+    const nex = Math.min(img.naturalWidth, sx + sw), ney = Math.min(img.naturalHeight, sy + sh);
+    if (nex <= nsx || ney <= nsy) return;
+    drawImageHQ(ctx, img, nsx, nsy, nex - nsx, ney - nsy,
+      dx + (nsx - sx) * kx, dy + (nsy - sy) * ky, (nex - nsx) * kx, (ney - nsy) * ky);
   }
 
   // centered text with manual letter-spacing (canvas letterSpacing isn't universal)
@@ -335,31 +378,53 @@
         ctx.textBaseline = 'middle';
         ctx.fillText(
           slot === 'bgTop'
-            ? (state.mode === 'double' ? '↑ 上傳上方背景照片' : '↑ 上傳背景照片')
-            : '↓ 上傳下方背景照片',
+            ? (state.mode === 'double' ? '↑ 上傳上方照片' : '↑ 上傳背景照片')
+            : '↓ 上傳下方照片',
           dx + dw / 2, dy + dh / 2
         );
       }
     }
 
     // insets
-    for (const slot of activeInsetSlots()) {
-      const s = state.slots[slot];
-      if (!s.img) continue;
-      const iw = W * state.insetScale;
-      const ih = iw * s.img.naturalHeight / s.img.naturalWidth;
-      const x = s.cx * W - iw / 2;
-      const y = s.cy * H - ih / 2;
-      if (state.insetShadow > 0) {
-        ctx.save();
-        ctx.shadowColor = `rgba(0,0,0,${0.55 * state.insetShadow})`;
-        ctx.shadowBlur = W * 0.03 * state.insetShadow;
-        ctx.shadowOffsetY = W * 0.006 * state.insetShadow;
-        ctx.fillStyle = '#000';
-        ctx.fillRect(x, y, iw, ih);
-        ctx.restore();
+    function insetShadowRect(rd) {
+      if (state.insetShadow <= 0) return;
+      ctx.save();
+      ctx.shadowColor = `rgba(0,0,0,${0.55 * state.insetShadow})`;
+      ctx.shadowBlur = W * 0.03 * state.insetShadow;
+      ctx.shadowOffsetY = W * 0.006 * state.insetShadow;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(rd.x, rd.y, rd.w, rd.h);
+      ctx.restore();
+    }
+
+    if (state.mode === 'double') {
+      // each inset is a window revealing what the OTHER inset hides:
+      // insetTop shows the part of bgBottom covered by insetBottom, and vice versa
+      const pairs = [
+        { show: 'insetTop',    hiddenBy: 'insetBottom', srcBg: 'bgBottom' },
+        { show: 'insetBottom', hiddenBy: 'insetTop',    srcBg: 'bgTop' },
+      ];
+      for (const p of pairs) {
+        const bgS = state.slots[p.srcBg];
+        if (!bgS.img) continue;
+        const rd = insetRect(p.show, W, H);
+        const rs = insetRect(p.hiddenBy, W, H);
+        insetShadowRect(rd);
+        const box = bgRect(p.srcBg);
+        const bx = box.x * W, by = box.y * H, bw = box.w * W, bh = box.h * H;
+        const c = coverCrop(bgS.img, bw, bh, bgS.panX, bgS.panY);
+        drawWindow(ctx, bgS.img,
+          c.sx + (rs.x - bx) / c.scale, c.sy + (rs.y - by) / c.scale,
+          rd.w / c.scale, rd.h / c.scale,
+          rd.x, rd.y, rd.w, rd.h);
       }
-      drawImageHQ(ctx, s.img, 0, 0, s.img.naturalWidth, s.img.naturalHeight, x, y, iw, ih);
+    } else {
+      const s = state.slots.insetSingle;
+      if (s.img) {
+        const rd = insetRect('insetSingle', W, H);
+        insetShadowRect(rd);
+        drawImageHQ(ctx, s.img, 0, 0, s.img.naturalWidth, s.img.naturalHeight, rd.x, rd.y, rd.w, rd.h);
+      }
     }
 
     // text block
@@ -415,16 +480,11 @@
       const img = state.slots[slot].img;
       if (!img) continue;
       const r = bgRect(slot);
-      const boxAspect = (r.w) / (r.h * state.ratio); // box width / box height in px terms
+      const boxAspect = r.w / (r.h * state.ratio);
       const imgAspect = img.naturalWidth / img.naturalHeight;
-      let w;
-      if (imgAspect > boxAspect) {
-        // cover uses the full source height; box height (r.h * ratio * W) = naturalHeight
-        w = img.naturalHeight / (r.h * state.ratio);
-      } else {
-        // cover uses the full source width; box width (r.w * W) = naturalWidth
-        w = img.naturalWidth / r.w;
-      }
+      const w = imgAspect > boxAspect
+        ? img.naturalHeight / (r.h * state.ratio)  // cover uses full source height
+        : img.naturalWidth / r.w;                  // cover uses full source width
       maxW = Math.max(maxW, w);
     }
     if (!maxW) maxW = 2160;
@@ -435,22 +495,71 @@
     const hasBg = activeBgSlots().some(s => state.slots[s].img);
     const w = exportWidth();
     const h = Math.round(w * state.ratio);
-    resinfo.textContent = hasBg ? `輸出尺寸：${w} × ${h} px` : '尚未上傳背景照片';
+    resinfo.textContent = hasBg ? `輸出尺寸：${w} × ${h} px` : '尚未上傳照片';
     document.getElementById('dlJpg').disabled = !hasBg;
     document.getElementById('dlPng').disabled = !hasBg;
   }
 
-  function download(type) {
-    const c = document.createElement('canvas');
-    render(c, exportWidth());
-    const ext = type === 'image/png' ? 'png' : 'jpg';
-    c.toBlob(blob => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `kris_collage_${Date.now()}.${ext}`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    }, type, 0.97);
+  // ---------- export & save ----------
+
+  // some devices (older iPhone Safari) cap canvas area around 16.7M px;
+  // probe the target size and shrink until the canvas actually works
+  function makeExportCanvas() {
+    let W = exportWidth();
+    for (let i = 0; i < 12; i++) {
+      const H = Math.round(W * state.ratio);
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const x = c.getContext('2d');
+      let ok = false;
+      if (x) {
+        try {
+          x.fillStyle = '#123456';
+          x.fillRect(W - 1, H - 1, 1, 1);
+          ok = x.getImageData(W - 1, H - 1, 1, 1).data[3] !== 0;
+        } catch (e) { ok = false; }
+      }
+      if (ok || W <= 1200) {
+        render(c, W);
+        return c;
+      }
+      W = Math.floor(W * 0.85);
+    }
+    return null;
+  }
+
+  const overlay = document.getElementById('saveOverlay');
+  const saveImg = document.getElementById('saveImg');
+  document.getElementById('saveClose').addEventListener('click', () => {
+    overlay.style.display = 'none';
+    if (saveImg.src) { URL.revokeObjectURL(saveImg.src); saveImg.removeAttribute('src'); }
+  });
+
+  async function download(type) {
+    const c = makeExportCanvas();
+    if (!c) { alert('這台裝置記憶體不足，無法輸出，請換較小的照片試試'); return; }
+    const blob = await new Promise(res => c.toBlob(res, type, 0.97));
+    if (!blob) { alert('輸出失敗，請再試一次'); return; }
+    const filename = `kris_collage_${Date.now()}.${type === 'image/png' ? 'png' : 'jpg'}`;
+
+    if (isMobile && navigator.canShare) {
+      // share sheet → 儲存影像 saves straight into the photo library
+      const file = new File([blob], filename, { type: blob.type });
+      if (navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file] }); return; }
+        catch (e) { if (e && e.name === 'AbortError') return; }
+      }
+      // share unavailable/blocked → long-press fallback
+      saveImg.src = URL.createObjectURL(blob);
+      overlay.style.display = 'flex';
+      return;
+    }
+
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
   document.getElementById('dlJpg').addEventListener('click', () => download('image/jpeg'));
   document.getElementById('dlPng').addEventListener('click', () => download('image/png'));
@@ -484,6 +593,17 @@
 
   // ---------- controls ----------
 
+  function applyModeUI() {
+    const dbl = state.mode === 'double';
+    document.getElementById('upl-bgBottom').style.display = dbl ? '' : 'none';
+    document.getElementById('upl-insetSingle').style.display = dbl ? 'none' : '';
+    document.getElementById('rowAspect').style.display = dbl ? '' : 'none';
+    document.querySelector('#upl-bgTop .lbl').textContent = dbl ? '上方照片' : '背景照片';
+    document.getElementById('photoNote').innerHTML = dbl
+      ? '雙圖模式只需上傳兩張照片：上方小圖自動顯示「下方照片被小圖遮住的部分」，下方小圖則顯示「上方照片被遮住的部分」——每張小圖搭配另一半的大圖，都能拼回完整原照。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。'
+      : '單圖模式：一張背景照片加一張自選小圖。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。';
+  }
+
   function segWire(id, apply) {
     const seg = document.getElementById(id);
     seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
@@ -493,11 +613,12 @@
       schedule();
     }));
   }
-  segWire('modeSeg', d => { state.mode = d.mode; });
+  segWire('modeSeg', d => { state.mode = d.mode; applyModeUI(); });
   segWire('ratioSeg', d => { state.ratio = parseFloat(d.ratio); });
 
   const wire = (id, fn) => document.getElementById(id).addEventListener('input', e => { fn(e.target.value); schedule(); });
   wire('insetSize', v => state.insetScale = parseFloat(v));
+  wire('insetAspect', v => state.insetAspect = parseFloat(v));
   wire('insetShadow', v => state.insetShadow = parseFloat(v));
   wire('txtSub', v => state.text.sub = v);
   wire('txtTitle', v => state.text.title = v);
@@ -518,13 +639,13 @@
   }
 
   function hitInset(p) {
+    const r = preview.getBoundingClientRect();
     const slots = activeInsetSlots().slice().reverse();
     for (const slot of slots) {
-      const s = state.slots[slot];
-      if (!s.img) continue;
-      const iw = state.insetScale; // fraction of width
-      const ihFrac = (iw * s.img.naturalHeight / s.img.naturalWidth) / state.ratio; // fraction of height
-      if (Math.abs(p.fx - s.cx) <= iw / 2 && Math.abs(p.fy - s.cy) <= ihFrac / 2) return slot;
+      const rd = insetRect(slot, r.width, r.height);
+      if (!rd) continue;
+      const px = p.fx * r.width, py = p.fy * r.height;
+      if (px >= rd.x && px <= rd.x + rd.w && py >= rd.y && py <= rd.y + rd.h) return slot;
     }
     return null;
   }
@@ -561,7 +682,7 @@
       const img = s.img;
       const r = bgRect(drag.slot);
       const rect = preview.getBoundingClientRect();
-      const dw = r.w * rect.width, dh = r.h * rect.height; // css px of the bg box
+      const dw = r.w * rect.width, dh = r.h * rect.height;
       const c = coverCrop(img, dw, dh, s.panX, s.panY);
       const dxSrc = (e.clientX - drag.lastX) / c.scale;
       const dySrc = (e.clientY - drag.lastY) / c.scale;
@@ -582,12 +703,13 @@
 
   window.addEventListener('resize', schedule);
 
+  applyModeUI();
   schedule();
   // repaint once webfonts land so canvas text uses them
   if (document.fonts && document.fonts.ready) {
     Promise.all([
       document.fonts.load('italic 500 64px "Playfair Display"'),
-      document.fonts.load('500 20px "Noto Serif JP" ', '秋色に包まれた'),
+      document.fonts.load('500 20px "Noto Serif JP"', '秋色に包まれた'),
       document.fonts.load('600 16px "Montserrat"'),
     ]).then(schedule).catch(() => {});
     document.fonts.ready.then(schedule);
