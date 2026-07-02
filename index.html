@@ -97,6 +97,7 @@
   }
   .seg button.active { color: #111; background: var(--accent); border-color: var(--accent); font-weight: 600; }
   .uploads { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .uploads.three { grid-template-columns: 1fr 1fr 1fr; }
   .upl {
     position: relative;
     border: 1.5px dashed var(--border);
@@ -164,7 +165,7 @@
 <header>
   <h1><em>Kris</em> Collage</h1>
   <span>相片拼貼 · 原畫質輸出</span>
-  <span class="ver">Kris20260702_v1</span>
+  <span class="ver">Kris20260702_v2</span>
 </header>
 
 <div class="layout">
@@ -181,7 +182,8 @@
       <div class="row">
         <label>模式</label>
         <div class="seg" id="modeSeg">
-          <button data-mode="double" class="active">上下雙圖</button>
+          <button data-mode="double" class="active">Double Collages</button>
+          <button data-mode="standout">People Standouts</button>
           <button data-mode="single">單圖</button>
         </div>
       </div>
@@ -198,7 +200,7 @@
 
     <div class="card">
       <h2>照片</h2>
-      <div class="uploads">
+      <div class="uploads" id="uploadsGrid">
         <label class="upl" id="upl-bgTop">
           <input type="file" accept="image/*" data-slot="bgTop">
           <span class="lbl">上方照片</span><span class="hint">點擊上傳</span>
@@ -211,8 +213,20 @@
           <input type="file" accept="image/*" data-slot="insetSingle">
           <span class="lbl">小圖</span><span class="hint">點擊上傳</span>
         </label>
+        <label class="upl" id="upl-stripLeft" style="display:none">
+          <input type="file" accept="image/*" data-slot="stripLeft">
+          <span class="lbl">左圖</span><span class="hint">點擊上傳</span>
+        </label>
+        <label class="upl" id="upl-stripMid" style="display:none">
+          <input type="file" accept="image/*" data-slot="stripMid">
+          <span class="lbl">中間人物</span><span class="hint">點擊上傳</span>
+        </label>
+        <label class="upl" id="upl-stripRight" style="display:none">
+          <input type="file" accept="image/*" data-slot="stripRight">
+          <span class="lbl">右圖</span><span class="hint">點擊上傳</span>
+        </label>
       </div>
-      <div class="row" style="margin-top:10px">
+      <div class="row" id="rowInsetSize" style="margin-top:10px">
         <label>小圖大小</label>
         <input type="range" id="insetSize" min="0.18" max="0.6" step="0.005" value="0.34">
       </div>
@@ -220,11 +234,15 @@
         <label>小圖長寬</label>
         <input type="range" id="insetAspect" min="0.7" max="1.5" step="0.01" value="1.15">
       </div>
-      <div class="row">
+      <div class="row" id="rowShadow">
         <label>小圖陰影</label>
         <input type="range" id="insetShadow" min="0" max="1" step="0.05" value="0.45">
       </div>
-      <div class="note" id="photoNote">雙圖模式只需上傳兩張照片：上方小圖自動顯示「下方照片被小圖遮住的部分」，下方小圖則顯示「上方照片被遮住的部分」——每張小圖搭配另一半的大圖，都能拼回完整原照。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。</div>
+      <div class="row" id="rowFeather" style="display:none">
+        <label>邊緣柔化</label>
+        <input type="range" id="feather" min="0" max="1" step="0.05" value="0.35">
+      </div>
+      <div class="note" id="photoNote"></div>
     </div>
 
     <div class="card">
@@ -259,18 +277,22 @@
   'use strict';
 
   const state = {
-    mode: 'double',           // 'double' | 'single'
+    mode: 'double',           // 'double' | 'standout' | 'single'
     ratio: 1.25,              // height / width
-    insetScale: 0.34,         // inset width as fraction of canvas width
-    insetAspect: 1.15,        // inset height / width (double-mode windows)
+    insetScale: 0.34,
+    insetAspect: 1.15,
     insetShadow: 0.45,
+    feather: 0.35,            // person cutout edge softness (standout)
     text: { sub: '秋色に包まれた', title: 'Japan Gold Film', label: 'JAPAN VOL.2', y: 0.49, titleSize: 0.078 },
     slots: {
       bgTop:       { img: null, panX: 0.5, panY: 0.5 },
       bgBottom:    { img: null, panX: 0.5, panY: 0.5 },
-      insetTop:    { cx: 0.5, cy: 0.28 },              // window into bgBottom
-      insetBottom: { cx: 0.5, cy: 0.72 },              // window into bgTop
-      insetSingle: { img: null, cx: 0.5, cy: 0.40 },   // manual inset (single mode)
+      stripLeft:   { img: null, panX: 0.5, panY: 0.5 },
+      stripMid:    { img: null, panX: 0.5, panY: 0.5 },
+      stripRight:  { img: null, panX: 0.5, panY: 0.5 },
+      insetTop:    { cx: 0.5, cy: 0.28 },
+      insetBottom: { cx: 0.5, cy: 0.72 },
+      insetSingle: { img: null, cx: 0.5, cy: 0.40 },
     },
   };
 
@@ -281,18 +303,34 @@
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   function activeBgSlots() {
-    return state.mode === 'double' ? ['bgTop', 'bgBottom'] : ['bgTop'];
+    if (state.mode === 'double') return ['bgTop', 'bgBottom'];
+    if (state.mode === 'standout') return ['stripLeft', 'stripMid', 'stripRight'];
+    return ['bgTop'];
   }
   function activeInsetSlots() {
-    return state.mode === 'double' ? ['insetTop', 'insetBottom'] : ['insetSingle'];
+    if (state.mode === 'double') return ['insetTop', 'insetBottom'];
+    if (state.mode === 'standout') return [];
+    return ['insetSingle'];
   }
 
   // rect of a background slot as fractions of the canvas
   function bgRect(slot) {
+    if (state.mode === 'standout') {
+      const i = { stripLeft: 0, stripMid: 1, stripRight: 2 }[slot];
+      return { x: i / 3, y: 0, w: 1 / 3, h: 1 };
+    }
     if (state.mode === 'single') return { x: 0, y: 0, w: 1, h: 1 };
     return slot === 'bgTop'
       ? { x: 0, y: 0,   w: 1, h: 0.5 }
       : { x: 0, y: 0.5, w: 1, h: 0.5 };
+  }
+
+  // pixel rect of a bg slot on a W x H canvas, rounded so adjacent boxes tile without seams
+  function bgRectPx(slot, W, H) {
+    const r = bgRect(slot);
+    const x0 = Math.round(r.x * W), y0 = Math.round(r.y * H);
+    const x1 = Math.round((r.x + r.w) * W), y1 = Math.round((r.y + r.h) * H);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
   // display rect (px) of an inset on a W x H canvas
@@ -351,7 +389,7 @@
       dx + (nsx - sx) * kx, dy + (nsy - sy) * ky, (nex - nsx) * kx, (ney - nsy) * ky);
   }
 
-  // centered text with manual letter-spacing (canvas letterSpacing isn't universal)
+  // centered text with manual letter-spacing
   function drawSpacedText(ctx, text, cxPx, yPx, spacingPx) {
     const chars = [...text];
     let total = 0;
@@ -364,6 +402,87 @@
     ctx.textAlign = prevAlign;
   }
 
+  // ---------- person segmentation (People Standouts) ----------
+
+  let segmenterPromise = null;
+  let segError = false;
+  function getSegmenter() {
+    if (!segmenterPromise) {
+      segmenterPromise = (async () => {
+        const v = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/vision_bundle.mjs');
+        const fs = await v.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/wasm');
+        return v.ImageSegmenter.createFromOptions(fs, {
+          baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite' },
+          runningMode: 'IMAGE',
+          outputConfidenceMasks: true,
+        });
+      })();
+    }
+    return segmenterPromise;
+  }
+
+  const segStore = new WeakMap(); // img -> { pending?, failed?, maskCanvas?, cutout?, cutoutFeather? }
+
+  async function segmentPerson(img) {
+    const entry = { pending: true };
+    segStore.set(img, entry);
+    updateResInfo();
+    try {
+      const seg = await getSegmenter();
+      const s = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * s));
+      c.height = Math.max(1, Math.round(img.naturalHeight * s));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const res = seg.segment(c);
+      const masks = res.confidenceMasks;
+      const m = masks.length > 1 ? masks[1] : masks[0];
+      const mw = m.width, mh = m.height;
+      const data = m.getAsFloat32Array();
+      const md = new ImageData(mw, mh);
+      for (let i = 0; i < mw * mh; i++) {
+        const a = Math.max(0, Math.min(255, Math.round(data[i] * 255)));
+        md.data[i * 4] = 255; md.data[i * 4 + 1] = 255; md.data[i * 4 + 2] = 255;
+        md.data[i * 4 + 3] = a;
+      }
+      masks.forEach(mm => mm.close());
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = mw; maskCanvas.height = mh;
+      maskCanvas.getContext('2d').putImageData(md, 0, 0);
+      segStore.set(img, { maskCanvas });
+    } catch (e) {
+      segError = true;
+      segStore.set(img, { failed: true });
+    }
+    updateResInfo();
+    schedule();
+  }
+
+  // full-resolution person cutout, cached per image + feather setting
+  function getCutout(img) {
+    const e = segStore.get(img);
+    if (!e) { segmentPerson(img); return null; }
+    if (e.pending || e.failed || !e.maskCanvas) return null;
+    if (!e.cutout || e.cutoutFeather !== state.feather) {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const x = c.getContext('2d');
+      x.drawImage(img, 0, 0);
+      x.globalCompositeOperation = 'destination-in';
+      x.imageSmoothingEnabled = true;
+      x.imageSmoothingQuality = 'high';
+      const blurPx = state.feather * img.naturalWidth * 0.004;
+      try { x.filter = blurPx > 0.5 ? `blur(${blurPx.toFixed(1)}px)` : 'none'; } catch (err) {}
+      x.drawImage(e.maskCanvas, 0, 0, c.width, c.height);
+      try { x.filter = 'none'; } catch (err) {}
+      e.cutout = c;
+      e.cutoutFeather = state.feather;
+    }
+    return e.cutout;
+  }
+
+  // ---------- rendering ----------
+
   function render(canvas, W) {
     const H = Math.round(W * state.ratio);
     canvas.width = W;
@@ -371,27 +490,46 @@
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, W, H);
 
+    const placeholderText = {
+      bgTop: state.mode === 'double' ? '↑ 上傳上方照片' : '↑ 上傳背景照片',
+      bgBottom: '↓ 上傳下方照片',
+      stripLeft: '左圖', stripMid: '中間人物', stripRight: '右圖',
+    };
+
     // backgrounds
     for (const slot of activeBgSlots()) {
       const s = state.slots[slot];
-      const r = bgRect(slot);
-      const dx = r.x * W, dy = r.y * H, dw = r.w * W, dh = r.h * H;
+      const r = bgRectPx(slot, W, H);
       if (s.img) {
-        const c = coverCrop(s.img, dw, dh, s.panX, s.panY);
-        drawImageHQ(ctx, s.img, c.sx, c.sy, c.sw, c.sh, dx, dy, dw, dh);
+        const c = coverCrop(s.img, r.w, r.h, s.panX, s.panY);
+        drawImageHQ(ctx, s.img, c.sx, c.sy, c.sw, c.sh, r.x, r.y, r.w, r.h);
       } else {
-        ctx.fillStyle = slot === 'bgTop' ? '#26262e' : '#1d1d24';
-        ctx.fillRect(dx, dy, dw, dh);
+        ctx.fillStyle = ['bgTop', 'stripLeft', 'stripRight'].includes(slot) ? '#26262e' : '#1d1d24';
+        ctx.fillRect(r.x, r.y, r.w, r.h);
         ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        ctx.font = `${Math.round(W * 0.028)}px sans-serif`;
+        ctx.font = `${Math.round(W * 0.026)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(
-          slot === 'bgTop'
-            ? (state.mode === 'double' ? '↑ 上傳上方照片' : '↑ 上傳背景照片')
-            : '↓ 上傳下方照片',
-          dx + dw / 2, dy + dh / 2
-        );
+        ctx.fillText(placeholderText[slot] || '上傳照片', r.x + r.w / 2, r.y + r.h / 2);
+      }
+    }
+
+    // person standout overlay: cutout of the middle photo drawn with the same
+    // cover transform as its strip, but NOT clipped — so the person spills
+    // over the left/right strips
+    if (state.mode === 'standout') {
+      const s = state.slots.stripMid;
+      if (s.img) {
+        const r = bgRectPx('stripMid', W, H);
+        const c = coverCrop(s.img, r.w, r.h, s.panX, s.panY);
+        const cutout = getCutout(s.img);
+        if (cutout) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(cutout,
+            r.x - c.sx * c.scale, r.y - c.sy * c.scale,
+            s.img.naturalWidth * c.scale, s.img.naturalHeight * c.scale);
+        }
       }
     }
 
@@ -408,8 +546,6 @@
     }
 
     if (state.mode === 'double') {
-      // each inset is a window revealing what the OTHER inset hides:
-      // insetTop shows the part of bgBottom covered by insetBottom, and vice versa
       const pairs = [
         { show: 'insetTop',    hiddenBy: 'insetBottom', srcBg: 'bgBottom' },
         { show: 'insetBottom', hiddenBy: 'insetTop',    srcBg: 'bgTop' },
@@ -420,15 +556,14 @@
         const rd = insetRect(p.show, W, H);
         const rs = insetRect(p.hiddenBy, W, H);
         insetShadowRect(rd);
-        const box = bgRect(p.srcBg);
-        const bx = box.x * W, by = box.y * H, bw = box.w * W, bh = box.h * H;
-        const c = coverCrop(bgS.img, bw, bh, bgS.panX, bgS.panY);
+        const box = bgRectPx(p.srcBg, W, H);
+        const c = coverCrop(bgS.img, box.w, box.h, bgS.panX, bgS.panY);
         drawWindow(ctx, bgS.img,
-          c.sx + (rs.x - bx) / c.scale, c.sy + (rs.y - by) / c.scale,
+          c.sx + (rs.x - box.x) / c.scale, c.sy + (rs.y - box.y) / c.scale,
           rd.w / c.scale, rd.h / c.scale,
           rd.x, rd.y, rd.w, rd.h);
       }
-    } else {
+    } else if (state.mode === 'single') {
       const s = state.slots.insetSingle;
       if (s.img) {
         const rd = insetRect('insetSingle', W, H);
@@ -493,8 +628,8 @@
       const boxAspect = r.w / (r.h * state.ratio);
       const imgAspect = img.naturalWidth / img.naturalHeight;
       const w = imgAspect > boxAspect
-        ? img.naturalHeight / (r.h * state.ratio)  // cover uses full source height
-        : img.naturalWidth / r.w;                  // cover uses full source width
+        ? img.naturalHeight / (r.h * state.ratio)
+        : img.naturalWidth / r.w;
       maxW = Math.max(maxW, w);
     }
     if (!maxW) maxW = 2160;
@@ -505,15 +640,22 @@
     const hasBg = activeBgSlots().some(s => state.slots[s].img);
     const w = exportWidth();
     const h = Math.round(w * state.ratio);
-    resinfo.textContent = hasBg ? `輸出尺寸：${w} × ${h} px` : '尚未上傳照片';
+    let txt = hasBg ? `輸出尺寸：${w} × ${h} px` : '尚未上傳照片';
+    if (state.mode === 'standout') {
+      const mid = state.slots.stripMid.img;
+      if (mid) {
+        const e = segStore.get(mid);
+        if (!e || e.pending) txt += '（人物偵測中…）';
+        else if (e.failed) txt += '（人物偵測失敗，僅顯示三格拼貼）';
+      }
+    }
+    resinfo.textContent = txt;
     document.getElementById('dlJpg').disabled = !hasBg;
     document.getElementById('dlPng').disabled = !hasBg;
   }
 
   // ---------- export & save ----------
 
-  // some devices (older iPhone Safari) cap canvas area around 16.7M px;
-  // probe the target size and shrink until the canvas actually works
   function makeExportCanvas() {
     let W = exportWidth();
     for (let i = 0; i < 12; i++) {
@@ -553,13 +695,11 @@
     const filename = `kris_collage_${Date.now()}.${type === 'image/png' ? 'png' : 'jpg'}`;
 
     if (isMobile && navigator.canShare) {
-      // share sheet → 儲存影像 saves straight into the photo library
       const file = new File([blob], filename, { type: blob.type });
       if (navigator.canShare({ files: [file] })) {
         try { await navigator.share({ files: [file] }); return; }
         catch (e) { if (e && e.name === 'AbortError') return; }
       }
-      // share unavailable/blocked → long-press fallback
       saveImg.src = URL.createObjectURL(blob);
       overlay.style.display = 'flex';
       return;
@@ -586,6 +726,7 @@
       th.src = thumbUrl;
       upl.querySelector('.hint').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
     }
+    if (slot === 'stripMid') segmentPerson(img);
     schedule();
   }
   window._setImage = setImage; // exposed for automated testing
@@ -604,14 +745,25 @@
   // ---------- controls ----------
 
   function applyModeUI() {
-    const dbl = state.mode === 'double';
-    document.getElementById('upl-bgBottom').style.display = dbl ? '' : 'none';
-    document.getElementById('upl-insetSingle').style.display = dbl ? 'none' : '';
-    document.getElementById('rowAspect').style.display = dbl ? '' : 'none';
-    document.querySelector('#upl-bgTop .lbl').textContent = dbl ? '上方照片' : '背景照片';
-    document.getElementById('photoNote').innerHTML = dbl
-      ? '雙圖模式只需上傳兩張照片：上方小圖自動顯示「下方照片被小圖遮住的部分」，下方小圖則顯示「上方照片被遮住的部分」——每張小圖搭配另一半的大圖，都能拼回完整原照。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。'
-      : '單圖模式：一張背景照片加一張自選小圖。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。';
+    const m = state.mode;
+    const show = (id, on) => document.getElementById(id).style.display = on ? '' : 'none';
+    show('upl-bgTop', m !== 'standout');
+    show('upl-bgBottom', m === 'double');
+    show('upl-insetSingle', m === 'single');
+    show('upl-stripLeft', m === 'standout');
+    show('upl-stripMid', m === 'standout');
+    show('upl-stripRight', m === 'standout');
+    show('rowInsetSize', m !== 'standout');
+    show('rowAspect', m === 'double');
+    show('rowShadow', m !== 'standout');
+    show('rowFeather', m === 'standout');
+    document.getElementById('uploadsGrid').classList.toggle('three', m === 'standout');
+    document.querySelector('#upl-bgTop .lbl').textContent = m === 'double' ? '上方照片' : '背景照片';
+    document.getElementById('photoNote').innerHTML = {
+      double: 'Double Collages：只需上傳兩張照片，上方小圖自動顯示「下方照片被小圖遮住的部分」，下方小圖則顯示「上方照片被遮住的部分」——每張小圖搭配另一半的大圖，都能拼回完整原照。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。',
+      standout: 'People Standouts：三張直圖並排，中間照片的人物會自動去背、跳出直條疊在左右兩張圖上。人物偵測在你的裝置上進行，照片不會上傳。直接在預覽圖上<b>拖曳</b>任一格調整取景。',
+      single: '單圖模式：一張背景照片加一張自選小圖。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。',
+    }[m];
   }
 
   function segWire(id, apply) {
@@ -630,6 +782,7 @@
   wire('insetSize', v => state.insetScale = parseFloat(v));
   wire('insetAspect', v => state.insetAspect = parseFloat(v));
   wire('insetShadow', v => state.insetShadow = parseFloat(v));
+  wire('feather', v => state.feather = parseFloat(v));
   wire('txtSub', v => state.text.sub = v);
   wire('txtTitle', v => state.text.title = v);
   wire('txtLabel', v => state.text.label = v);
@@ -661,6 +814,10 @@
   }
 
   function hitBg(p) {
+    if (state.mode === 'standout') {
+      const slot = ['stripLeft', 'stripMid', 'stripRight'][Math.min(2, Math.floor(p.fx * 3))];
+      return state.slots[slot].img ? slot : null;
+    }
     if (state.mode === 'single') return state.slots.bgTop.img ? 'bgTop' : null;
     const slot = p.fy < 0.5 ? 'bgTop' : 'bgBottom';
     return state.slots[slot].img ? slot : null;
@@ -690,10 +847,9 @@
     } else {
       const s = state.slots[drag.slot];
       const img = s.img;
-      const r = bgRect(drag.slot);
       const rect = preview.getBoundingClientRect();
-      const dw = r.w * rect.width, dh = r.h * rect.height;
-      const c = coverCrop(img, dw, dh, s.panX, s.panY);
+      const box = bgRectPx(drag.slot, rect.width, rect.height);
+      const c = coverCrop(img, box.w, box.h, s.panX, s.panY);
       const dxSrc = (e.clientX - drag.lastX) / c.scale;
       const dySrc = (e.clientY - drag.lastY) / c.scale;
       const slackX = img.naturalWidth - c.sw;
@@ -715,7 +871,6 @@
 
   applyModeUI();
   schedule();
-  // repaint once webfonts land so canvas text uses them
   if (document.fonts && document.fonts.ready) {
     Promise.all([
       document.fonts.load('italic 500 64px "Playfair Display"'),
