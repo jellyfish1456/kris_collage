@@ -165,7 +165,7 @@
 <header>
   <h1><em>Kris</em> Collage</h1>
   <span>相片拼貼 · 原畫質輸出</span>
-  <span class="ver">Kris20260702_v3</span>
+  <span class="ver">Kris20260702_v4</span>
 </header>
 
 <div class="layout">
@@ -191,6 +191,7 @@
       <div class="row">
         <label>比例</label>
         <div class="seg" id="ratioSeg">
+          <button data-ratio="auto">原圖</button>
           <button data-ratio="1.25" class="active">4:5</button>
           <button data-ratio="1">1:1</button>
           <button data-ratio="1.3333">3:4</button>
@@ -298,8 +299,9 @@
   'use strict';
 
   const state = {
-    mode: 'double',           // 'double' | 'standout' | 'single'
-    ratio: 1.25,              // height / width
+    mode: 'double',           // 'double' | 'standout' | 'seetake' | 'single'
+    ratio: 1.25,              // height / width (fixed ratio)
+    ratioMode: 'fixed',       // 'fixed' | 'auto' (auto = follow uploaded photo)
     insetScale: 0.34,
     insetAspect: 1.15,
     insetShadow: 0.45,
@@ -329,6 +331,21 @@
 
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  // the photo whose aspect ratio defines the canvas in 'auto' ratio mode
+  function autoRatioImg() {
+    if (state.mode === 'seetake') return state.slots.seeImg.img;
+    if (state.mode === 'single') return state.slots.bgTop.img;
+    return null;
+  }
+  // effective canvas ratio (height / width)
+  function getRatio() {
+    if (state.ratioMode === 'auto') {
+      const img = autoRatioImg();
+      if (img) return img.naturalHeight / img.naturalWidth;
+    }
+    return state.ratio;
+  }
 
   function activeBgSlots() {
     if (state.mode === 'double') return ['bgTop', 'bgBottom'];
@@ -514,7 +531,7 @@
 
   function render(canvas, W, opts) {
     opts = opts || {};
-    const H = Math.round(W * state.ratio);
+    const H = Math.round(W * getRatio());
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext('2d');
@@ -705,10 +722,10 @@
       const img = state.slots[slot].img;
       if (!img) continue;
       const r = bgRect(slot);
-      const boxAspect = r.w / (r.h * state.ratio);
+      const boxAspect = r.w / (r.h * getRatio());
       const imgAspect = img.naturalWidth / img.naturalHeight;
       const w = imgAspect > boxAspect
-        ? img.naturalHeight / (r.h * state.ratio)
+        ? img.naturalHeight / (r.h * getRatio())
         : img.naturalWidth / r.w;
       maxW = Math.max(maxW, w);
     }
@@ -719,7 +736,7 @@
   function updateResInfo() {
     const hasBg = activeBgSlots().some(s => state.slots[s].img);
     const w = exportWidth();
-    const h = Math.round(w * state.ratio);
+    const h = Math.round(w * getRatio());
     let txt = hasBg ? `輸出尺寸：${w} × ${h} px` : '尚未上傳照片';
     if (state.mode === 'standout') {
       const mid = state.slots.stripMid.img;
@@ -739,7 +756,7 @@
   function makeExportCanvas() {
     let W = exportWidth();
     for (let i = 0; i < 12; i++) {
-      const H = Math.round(W * state.ratio);
+      const H = Math.round(W * getRatio());
       const c = document.createElement('canvas');
       c.width = W; c.height = H;
       const x = c.getContext('2d');
@@ -844,6 +861,9 @@
     show('textGroupSee', m === 'seetake');
     document.getElementById('uploadsGrid').classList.toggle('three', m === 'standout');
     document.querySelector('#upl-bgTop .lbl').textContent = m === 'double' ? '上方照片' : '背景照片';
+    // seetake defaults to following the uploaded photo's orientation
+    if (m === 'seetake') { state.ratioMode = 'auto'; selectRatioButton('auto'); }
+    else if (state.ratioMode === 'auto') { state.ratioMode = 'fixed'; selectRatioButton(String(state.ratio)); }
     document.getElementById('photoNote').innerHTML = {
       double: 'Double Collages：只需上傳兩張照片，上方小圖自動顯示「下方照片被小圖遮住的部分」，下方小圖則顯示「上方照片被遮住的部分」——每張小圖搭配另一半的大圖，都能拼回完整原照。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。',
       standout: 'People Standouts：三張直圖並排，中間照片的人物會自動去背、跳出直條疊在左右兩張圖上。人物偵測在你的裝置上進行，照片不會上傳。直接在預覽圖上<b>拖曳</b>任一格調整取景。',
@@ -862,7 +882,15 @@
     }));
   }
   segWire('modeSeg', d => { state.mode = d.mode; applyModeUI(); });
-  segWire('ratioSeg', d => { state.ratio = parseFloat(d.ratio); });
+  segWire('ratioSeg', d => {
+    if (d.ratio === 'auto') { state.ratioMode = 'auto'; }
+    else { state.ratioMode = 'fixed'; state.ratio = parseFloat(d.ratio); }
+  });
+
+  function selectRatioButton(val) {
+    document.querySelectorAll('#ratioSeg button').forEach(b =>
+      b.classList.toggle('active', b.dataset.ratio === val));
+  }
 
   const wire = (id, fn) => document.getElementById(id).addEventListener('input', e => { fn(e.target.value); schedule(); });
   wire('insetSize', v => state.insetScale = parseFloat(v));
