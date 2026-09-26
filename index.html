@@ -165,7 +165,7 @@
 <header>
   <h1><em>Kris</em> Collage</h1>
   <span>相片拼貼 · 原畫質輸出</span>
-  <span class="ver">Kris20260702_v4</span>
+  <span class="ver">Kris20260702_v5</span>
 </header>
 
 <div class="layout">
@@ -185,6 +185,7 @@
           <button data-mode="double" class="active">Double Collages</button>
           <button data-mode="standout">People Standouts</button>
           <button data-mode="seetake">What I See</button>
+          <button data-mode="faceswap">Face Swap</button>
           <button data-mode="single">單圖</button>
         </div>
       </div>
@@ -231,6 +232,14 @@
           <input type="file" accept="image/*" data-slot="seeImg">
           <span class="lbl">照片</span><span class="hint">點擊上傳</span>
         </label>
+        <label class="upl" id="upl-faceBase" style="display:none">
+          <input type="file" accept="image/*" data-slot="faceBase">
+          <span class="lbl">原圖</span><span class="hint">被換臉的照片</span>
+        </label>
+        <label class="upl" id="upl-faceSrc" style="display:none">
+          <input type="file" accept="image/*" data-slot="faceSrc">
+          <span class="lbl">來源臉</span><span class="hint">要換上去的臉</span>
+        </label>
       </div>
       <div class="row" id="rowInsetSize" style="margin-top:10px">
         <label>小圖大小</label>
@@ -256,6 +265,14 @@
       <div class="row" id="rowFrameWidth" style="display:none">
         <label>框線粗細</label>
         <input type="range" id="frameWidth" min="0.003" max="0.02" step="0.001" value="0.008">
+      </div>
+      <div class="row" id="rowSwapFeather" style="display:none">
+        <label>融合柔化</label>
+        <input type="range" id="swapFeather" min="0.1" max="1" step="0.05" value="0.5">
+      </div>
+      <div class="row" id="rowSwapColor" style="display:none">
+        <label>膚色校正</label>
+        <input type="range" id="swapColor" min="0" max="1" step="0.05" value="0.7">
       </div>
       <div class="note" id="photoNote"></div>
     </div>
@@ -309,6 +326,8 @@
     frameColor: '#ffd100',    // National Geographic yellow (seetake)
     frameWidth: 0.008,        // stroke width as fraction of canvas width
     frame: { x0: 0.34, y0: 0.30, x1: 0.66, y1: 0.72 }, // fractions of W (x) / H (y)
+    swapFeather: 0.5,         // face swap blend edge softness
+    swapColor: 0.7,           // face swap skin-tone correction strength
     text: {
       sub: '秋色に包まれた', title: 'Japan Gold Film', label: 'JAPAN VOL.2', y: 0.49, titleSize: 0.078,
       see: 'What I see ...', take: 'What I take', seeSize: 0.055,
@@ -320,6 +339,8 @@
       stripMid:    { img: null, panX: 0.5, panY: 0.5 },
       stripRight:  { img: null, panX: 0.5, panY: 0.5 },
       seeImg:      { img: null, panX: 0.5, panY: 0.5 },
+      faceBase:    { img: null, panX: 0.5, panY: 0.5 },
+      faceSrc:     { img: null, panX: 0.5, panY: 0.5 },
       insetTop:    { cx: 0.5, cy: 0.28 },
       insetBottom: { cx: 0.5, cy: 0.72 },
       insetSingle: { img: null, cx: 0.5, cy: 0.40 },
@@ -335,6 +356,7 @@
   // the photo whose aspect ratio defines the canvas in 'auto' ratio mode
   function autoRatioImg() {
     if (state.mode === 'seetake') return state.slots.seeImg.img;
+    if (state.mode === 'faceswap') return state.slots.faceBase.img;
     if (state.mode === 'single') return state.slots.bgTop.img;
     return null;
   }
@@ -351,11 +373,12 @@
     if (state.mode === 'double') return ['bgTop', 'bgBottom'];
     if (state.mode === 'standout') return ['stripLeft', 'stripMid', 'stripRight'];
     if (state.mode === 'seetake') return ['seeImg'];
+    if (state.mode === 'faceswap') return ['faceBase'];
     return ['bgTop'];
   }
   function activeInsetSlots() {
     if (state.mode === 'double') return ['insetTop', 'insetBottom'];
-    if (state.mode === 'standout' || state.mode === 'seetake') return [];
+    if (state.mode === 'standout' || state.mode === 'seetake' || state.mode === 'faceswap') return [];
     return ['insetSingle'];
   }
 
@@ -365,7 +388,7 @@
       const i = { stripLeft: 0, stripMid: 1, stripRight: 2 }[slot];
       return { x: i / 3, y: 0, w: 1 / 3, h: 1 };
     }
-    if (state.mode === 'single' || state.mode === 'seetake') return { x: 0, y: 0, w: 1, h: 1 };
+    if (state.mode === 'single' || state.mode === 'seetake' || state.mode === 'faceswap') return { x: 0, y: 0, w: 1, h: 1 };
     return slot === 'bgTop'
       ? { x: 0, y: 0,   w: 1, h: 0.5 }
       : { x: 0, y: 0.5, w: 1, h: 0.5 };
@@ -527,6 +550,254 @@
     return e.cutout;
   }
 
+  // ---------- face swap (in-browser landmark warp) ----------
+
+  // ordered MediaPipe face-mesh oval (jaw + forehead boundary) for the blend mask
+  const FACE_OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,
+    400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
+
+  let faceLandmarkerPromise = null;
+  function getFaceLandmarker() {
+    if (!faceLandmarkerPromise) {
+      faceLandmarkerPromise = (async () => {
+        const v = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/vision_bundle.mjs');
+        const fs = await v.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/wasm');
+        return v.FaceLandmarker.createFromOptions(fs, {
+          baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' },
+          runningMode: 'IMAGE',
+          numFaces: 1,
+        });
+      })();
+    }
+    return faceLandmarkerPromise;
+  }
+
+  // detect landmarks, returning points in the image's own pixel coordinates
+  function detectLandmarks(fl, img) {
+    const maxSide = 1400;
+    const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * s));
+    c.height = Math.max(1, Math.round(img.naturalHeight * s));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const res = fl.detect(c);
+    if (!res.faceLandmarks || !res.faceLandmarks.length) return null;
+    // normalized coords → full-resolution pixels
+    return res.faceLandmarks[0].map(p => ({ x: p.x * img.naturalWidth, y: p.y * img.naturalHeight }));
+  }
+
+  // Bowyer–Watson Delaunay; returns triangles as index triples into pts
+  function delaunay(pts) {
+    const n = pts.length;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }
+    const dmax = Math.max(maxX - minX, maxY - minY) || 1;
+    const midx = (minX + maxX) / 2, midy = (minY + maxY) / 2;
+    const P = pts.map(p => ({ x: p.x, y: p.y }));
+    P.push({ x: midx - 20 * dmax, y: midy - dmax });
+    P.push({ x: midx, y: midy + 20 * dmax });
+    P.push({ x: midx + 20 * dmax, y: midy - dmax });
+    const s0 = n, s1 = n + 1, s2 = n + 2;
+
+    function circum(a, b, c) {
+      const ax = P[a].x, ay = P[a].y, bx = P[b].x, by = P[b].y, cx = P[c].x, cy = P[c].y;
+      const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+      if (Math.abs(d) < 1e-9) return { x: 0, y: 0, r2: Infinity };
+      const a2 = ax * ax + ay * ay, b2 = bx * bx + by * by, c2 = cx * cx + cy * cy;
+      const ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d;
+      const uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d;
+      const dx = ax - ux, dy = ay - uy;
+      return { x: ux, y: uy, r2: dx * dx + dy * dy };
+    }
+    const shares = (t, a, b) => (t[0] === a || t[1] === a || t[2] === a) && (t[0] === b || t[1] === b || t[2] === b);
+
+    let tris = [[s0, s1, s2]];
+    for (let i = 0; i < n; i++) {
+      const p = P[i];
+      const bad = [];
+      for (const t of tris) {
+        const cc = circum(t[0], t[1], t[2]);
+        const dx = p.x - cc.x, dy = p.y - cc.y;
+        if (dx * dx + dy * dy < cc.r2) bad.push(t);
+      }
+      const edges = [];
+      for (const t of bad) {
+        const te = [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]];
+        for (const ed of te) {
+          let shared = false;
+          for (const t2 of bad) { if (t2 === t) continue; if (shares(t2, ed[0], ed[1])) { shared = true; break; } }
+          if (!shared) edges.push(ed);
+        }
+      }
+      tris = tris.filter(t => bad.indexOf(t) === -1);
+      for (const ed of edges) tris.push([ed[0], ed[1], i]);
+    }
+    return tris.filter(t => t[0] < n && t[1] < n && t[2] < n);
+  }
+
+  // affine mapping src triangle → dst triangle (a,b,c,d,e,f for setTransform)
+  function affineFromTriangles(s, d) {
+    const x0 = s[0].x, y0 = s[0].y, x1 = s[1].x, y1 = s[1].y, x2 = s[2].x, y2 = s[2].y;
+    const den = x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1);
+    if (Math.abs(den) < 1e-9) return null;
+    // inverse of [[x0,x1,x2],[y0,y1,y2],[1,1,1]]
+    const i00 = (y1 - y2) / den, i01 = (x2 - x1) / den, i02 = (x1 * y2 - x2 * y1) / den;
+    const i10 = (y2 - y0) / den, i11 = (x0 - x2) / den, i12 = (x2 * y0 - x0 * y2) / den;
+    const i20 = (y0 - y1) / den, i21 = (x1 - x0) / den, i22 = (x0 * y1 - x1 * y0) / den;
+    const u0 = d[0].x, u1 = d[1].x, u2 = d[2].x, v0 = d[0].y, v1 = d[1].y, v2 = d[2].y;
+    // A = Dst * inv(Src)
+    return {
+      a: u0 * i00 + u1 * i10 + u2 * i20,
+      c: u0 * i01 + u1 * i11 + u2 * i21,
+      e: u0 * i02 + u1 * i12 + u2 * i22,
+      b: v0 * i00 + v1 * i10 + v2 * i20,
+      d: v0 * i01 + v1 * i11 + v2 * i21,
+      f: v0 * i02 + v1 * i12 + v2 * i22,
+    };
+  }
+
+  // slightly grow a triangle around its centroid to avoid hairline seams
+  function dilateTri(t, px) {
+    const cx = (t[0].x + t[1].x + t[2].x) / 3, cy = (t[0].y + t[1].y + t[2].y) / 3;
+    return t.map(p => {
+      const dx = p.x - cx, dy = p.y - cy, len = Math.hypot(dx, dy) || 1;
+      return { x: p.x + dx / len * px, y: p.y + dy / len * px };
+    });
+  }
+
+  function buildSwap(base, src, baseLm, srcLm) {
+    const W = base.naturalWidth, H = base.naturalHeight;
+    const result = document.createElement('canvas');
+    result.width = W; result.height = H;
+    const rctx = result.getContext('2d');
+    rctx.drawImage(base, 0, 0);
+
+    // warp source face onto the base landmark positions, triangle by triangle
+    const warp = document.createElement('canvas');
+    warp.width = W; warp.height = H;
+    const wctx = warp.getContext('2d');
+    wctx.imageSmoothingEnabled = true; wctx.imageSmoothingQuality = 'high';
+    const tris = delaunay(baseLm);
+    for (const [ia, ib, ic] of tris) {
+      const dTri = [baseLm[ia], baseLm[ib], baseLm[ic]];
+      const sTri = [srcLm[ia], srcLm[ib], srcLm[ic]];
+      const dGrown = dilateTri(dTri, 0.6);
+      const m = affineFromTriangles(sTri, dGrown);
+      if (!m) continue;
+      wctx.save();
+      wctx.beginPath();
+      wctx.moveTo(dGrown[0].x, dGrown[0].y);
+      wctx.lineTo(dGrown[1].x, dGrown[1].y);
+      wctx.lineTo(dGrown[2].x, dGrown[2].y);
+      wctx.closePath();
+      wctx.clip();
+      wctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+      wctx.drawImage(src, 0, 0);
+      wctx.restore();
+      wctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    // blend mask from the face oval, feathered
+    const oval = FACE_OVAL.map(i => baseLm[i]).filter(Boolean);
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const p of oval) { bx0 = Math.min(bx0, p.x); by0 = Math.min(by0, p.y); bx1 = Math.max(bx1, p.x); by1 = Math.max(by1, p.y); }
+    const faceSize = Math.max(bx1 - bx0, by1 - by0) || W * 0.3;
+
+    const mask = document.createElement('canvas');
+    mask.width = W; mask.height = H;
+    const mctx = mask.getContext('2d');
+    const blurPx = Math.max(2, faceSize * 0.06 * state.swapFeather);
+    // erode the polygon a touch inward so the feather stays inside real skin
+    const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
+    mctx.fillStyle = '#fff';
+    try { mctx.filter = `blur(${blurPx.toFixed(1)}px)`; } catch (e) {}
+    mctx.beginPath();
+    oval.forEach((p, i) => {
+      const dx = p.x - cx, dy = p.y - cy;
+      const inx = cx + dx * 0.94, iny = cy + dy * 0.94;
+      if (i === 0) mctx.moveTo(inx, iny); else mctx.lineTo(inx, iny);
+    });
+    mctx.closePath();
+    mctx.fill();
+    try { mctx.filter = 'none'; } catch (e) {}
+
+    // optional skin-tone correction: shift warped face toward base colours within the mask
+    if (state.swapColor > 0) {
+      try {
+        const ix = Math.max(0, Math.floor(bx0)), iy = Math.max(0, Math.floor(by0));
+        const iw = Math.min(W - ix, Math.ceil(bx1 - bx0)), ih = Math.min(H - iy, Math.ceil(by1 - by0));
+        if (iw > 1 && ih > 1) {
+          const bd = rctx.getImageData(ix, iy, iw, ih).data;
+          const wd = wctx.getImageData(ix, iy, iw, ih);
+          const md = mctx.getImageData(ix, iy, iw, ih).data;
+          let n = 0, sb = [0, 0, 0], sw = [0, 0, 0];
+          for (let i = 0; i < wd.data.length; i += 4) {
+            if (md[i + 3] > 150 && wd.data[i + 3] > 150) {
+              n++;
+              sb[0] += bd[i]; sb[1] += bd[i + 1]; sb[2] += bd[i + 2];
+              sw[0] += wd.data[i]; sw[1] += wd.data[i + 1]; sw[2] += wd.data[i + 2];
+            }
+          }
+          if (n > 20) {
+            const dR = (sb[0] - sw[0]) / n * state.swapColor;
+            const dG = (sb[1] - sw[1]) / n * state.swapColor;
+            const dB = (sb[2] - sw[2]) / n * state.swapColor;
+            const cl = v => v < 0 ? 0 : v > 255 ? 255 : v;
+            for (let i = 0; i < wd.data.length; i += 4) {
+              if (wd.data[i + 3] > 0) {
+                wd.data[i] = cl(wd.data[i] + dR);
+                wd.data[i + 1] = cl(wd.data[i + 1] + dG);
+                wd.data[i + 2] = cl(wd.data[i + 2] + dB);
+              }
+            }
+            wctx.putImageData(wd, ix, iy);
+          }
+        }
+      } catch (e) { /* cross-origin or memory — skip correction */ }
+    }
+
+    // clip warped face to the feathered mask, then composite over the base
+    wctx.globalCompositeOperation = 'destination-in';
+    wctx.setTransform(1, 0, 0, 1, 0, 0);
+    wctx.drawImage(mask, 0, 0);
+    wctx.globalCompositeOperation = 'source-over';
+    rctx.drawImage(warp, 0, 0);
+    return result;
+  }
+
+  let faceSwapResult = null;
+  let swapStatus = 'idle';   // 'idle' | 'running' | 'done' | 'failed'
+  let swapToken = 0;
+  let swapTimer = null;
+
+  async function computeFaceSwap() {
+    const base = state.slots.faceBase.img, src = state.slots.faceSrc.img;
+    if (!base || !src) { faceSwapResult = null; swapStatus = 'idle'; updateResInfo(); schedule(); return; }
+    const my = ++swapToken;
+    swapStatus = 'running'; updateResInfo(); schedule();
+    try {
+      const fl = await getFaceLandmarker();
+      const baseLm = detectLandmarks(fl, base);
+      const srcLm = detectLandmarks(fl, src);
+      if (my !== swapToken) return;
+      if (!baseLm) throw new Error('原圖找不到臉');
+      if (!srcLm) throw new Error('來源照片找不到臉');
+      const out = buildSwap(base, src, baseLm, srcLm);
+      if (my !== swapToken) return;
+      faceSwapResult = out; swapStatus = 'done';
+    } catch (e) {
+      if (my === swapToken) { faceSwapResult = null; swapStatus = 'failed'; swapError = e.message || String(e); }
+    }
+    updateResInfo(); schedule();
+  }
+  let swapError = '';
+
+  function requestFaceSwap() {
+    faceSwapResult = null;
+    if (swapTimer) clearTimeout(swapTimer);
+    swapTimer = setTimeout(computeFaceSwap, 120);
+  }
+
   // ---------- rendering ----------
 
   function render(canvas, W, opts) {
@@ -541,16 +812,18 @@
       bgTop: state.mode === 'double' ? '↑ 上傳上方照片' : '↑ 上傳背景照片',
       bgBottom: '↓ 上傳下方照片',
       stripLeft: '左圖', stripMid: '中間人物', stripRight: '右圖',
-      seeImg: '↑ 上傳照片',
+      seeImg: '↑ 上傳照片', faceBase: '↑ 上傳原圖',
     };
 
     // backgrounds
     for (const slot of activeBgSlots()) {
       const s = state.slots[slot];
       const r = bgRectPx(slot, W, H);
-      if (s.img) {
-        const c = coverCrop(s.img, r.w, r.h, s.panX, s.panY);
-        drawImageHQ(ctx, s.img, c.sx, c.sy, c.sw, c.sh, r.x, r.y, r.w, r.h);
+      // in face-swap mode show the composited result once it is ready
+      const img = (state.mode === 'faceswap' && slot === 'faceBase' && faceSwapResult) ? faceSwapResult : s.img;
+      if (img) {
+        const c = coverCrop(img, r.w, r.h, s.panX, s.panY);
+        drawImageHQ(ctx, img, c.sx, c.sy, c.sw, c.sh, r.x, r.y, r.w, r.h);
       } else {
         ctx.fillStyle = ['bgTop', 'stripLeft', 'stripRight'].includes(slot) ? '#26262e' : '#1d1d24';
         ctx.fillRect(r.x, r.y, r.w, r.h);
@@ -671,7 +944,7 @@
 
     // text block
     const t = state.text;
-    if (state.mode !== 'seetake' && (t.sub || t.title || t.label)) {
+    if (state.mode !== 'seetake' && state.mode !== 'faceswap' && (t.sub || t.title || t.label)) {
       const cx = W / 2;
       const baseY = t.y * H;
       const titlePx = W * t.titleSize;
@@ -745,6 +1018,12 @@
         if (!e || e.pending) txt += '（人物偵測中…）';
         else if (e.failed) txt += '（人物偵測失敗，僅顯示三格拼貼）';
       }
+    }
+    if (state.mode === 'faceswap') {
+      const bothIn = state.slots.faceBase.img && state.slots.faceSrc.img;
+      if (!bothIn) txt = state.slots.faceBase.img ? '請再上傳「來源臉」照片' : '請上傳原圖與來源臉兩張照片';
+      else if (swapStatus === 'running') txt += '（換臉運算中…首次需下載模型稍等片刻）';
+      else if (swapStatus === 'failed') txt += `（換臉失敗：${swapError || '偵測不到清晰的臉'}）`;
     }
     resinfo.textContent = txt;
     document.getElementById('dlJpg').disabled = !hasBg;
@@ -824,6 +1103,7 @@
       upl.querySelector('.hint').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
     }
     if (slot === 'stripMid') segmentPerson(img);
+    if (slot === 'faceBase' || slot === 'faceSrc') requestFaceSwap();
     schedule();
   }
   window._setImage = setImage; // exposed for automated testing
@@ -851,23 +1131,28 @@
     show('upl-stripMid', m === 'standout');
     show('upl-stripRight', m === 'standout');
     show('upl-seeImg', m === 'seetake');
-    show('rowInsetSize', m !== 'standout' && m !== 'seetake');
+    show('upl-faceBase', m === 'faceswap');
+    show('upl-faceSrc', m === 'faceswap');
+    show('rowInsetSize', m !== 'standout' && m !== 'seetake' && m !== 'faceswap');
     show('rowAspect', m === 'double');
-    show('rowShadow', m !== 'standout' && m !== 'seetake');
+    show('rowShadow', m !== 'standout' && m !== 'seetake' && m !== 'faceswap');
     show('rowFeather', m === 'standout');
     show('rowFrameColor', m === 'seetake');
     show('rowFrameWidth', m === 'seetake');
-    show('textGroupDefault', m !== 'seetake');
+    show('rowSwapFeather', m === 'faceswap');
+    show('rowSwapColor', m === 'faceswap');
+    show('textGroupDefault', m !== 'seetake' && m !== 'faceswap');
     show('textGroupSee', m === 'seetake');
     document.getElementById('uploadsGrid').classList.toggle('three', m === 'standout');
     document.querySelector('#upl-bgTop .lbl').textContent = m === 'double' ? '上方照片' : '背景照片';
-    // seetake defaults to following the uploaded photo's orientation
-    if (m === 'seetake') { state.ratioMode = 'auto'; selectRatioButton('auto'); }
+    // seetake / faceswap follow the uploaded photo's orientation
+    if (m === 'seetake' || m === 'faceswap') { state.ratioMode = 'auto'; selectRatioButton('auto'); }
     else if (state.ratioMode === 'auto') { state.ratioMode = 'fixed'; selectRatioButton(String(state.ratio)); }
     document.getElementById('photoNote').innerHTML = {
       double: 'Double Collages：只需上傳兩張照片，上方小圖自動顯示「下方照片被小圖遮住的部分」，下方小圖則顯示「上方照片被遮住的部分」——每張小圖搭配另一半的大圖，都能拼回完整原照。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。',
       standout: 'People Standouts：三張直圖並排，中間照片的人物會自動去背、跳出直條疊在左右兩張圖上。人物偵測在你的裝置上進行，照片不會上傳。直接在預覽圖上<b>拖曳</b>任一格調整取景。',
       seetake: 'What I See / What I Take：上傳一張照片，用手<b>拖曳黃色框</b>移動位置、拉<b>四角</b>縮放，框住你想「拍下」的部分。框外拖曳可調整照片取景。框線預設國家地理黃，可自訂顏色。',
+      faceswap: 'Face Swap：上傳「原圖」（要被換臉的照片）與「來源臉」（要換上去的臉），系統會在你的裝置上偵測兩張臉的特徵點、變形對位融合，輸出維持原圖解析度。照片不會上傳。<b>適合清晰正面、角度接近的臉</b>；側臉或遮擋效果有限。請確保你擁有照片並取得當事人同意。',
       single: '單圖模式：一張背景照片加一張自選小圖。直接在預覽圖上<b>拖曳</b>：拖小圖移動位置，拖背景調整取景。',
     }[m];
   }
@@ -899,6 +1184,8 @@
   wire('feather', v => state.feather = parseFloat(v));
   wire('frameColor', v => state.frameColor = v);
   wire('frameWidth', v => state.frameWidth = parseFloat(v));
+  wire('swapFeather', v => { state.swapFeather = parseFloat(v); if (state.mode === 'faceswap') requestFaceSwap(); });
+  wire('swapColor', v => { state.swapColor = parseFloat(v); if (state.mode === 'faceswap') requestFaceSwap(); });
   wire('txtSee', v => state.text.see = v);
   wire('txtTake', v => state.text.take = v);
   wire('seeSize', v => state.text.seeSize = parseFloat(v));
