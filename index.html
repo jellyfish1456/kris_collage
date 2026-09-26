@@ -165,7 +165,7 @@
 <header>
   <h1><em>Kris</em> Collage</h1>
   <span>相片拼貼 · 原畫質輸出</span>
-  <span class="ver">Kris20260702_v6</span>
+  <span class="ver">Kris20260702_v7</span>
 </header>
 
 <div class="layout">
@@ -419,13 +419,18 @@
     return { x: s.cx * W - iw / 2, y: s.cy * H - ih / 2, w: iw, h: ih };
   }
 
+  // intrinsic size of an <img> OR a <canvas> (canvas has no naturalWidth)
+  function imgW(img) { return img.naturalWidth || img.width; }
+  function imgH(img) { return img.naturalHeight || img.height; }
+
   // source crop for cover-fit of img into a dw x dh box (px), honoring pan
   function coverCrop(img, dw, dh, panX, panY) {
-    const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
+    const iw = imgW(img), ih = imgH(img);
+    const scale = Math.max(dw / iw, dh / ih);
     const cw = dw / scale, ch = dh / scale;
     return {
-      sx: (img.naturalWidth - cw) * panX,
-      sy: (img.naturalHeight - ch) * panY,
+      sx: (iw - cw) * panX,
+      sy: (ih - ch) * panY,
       sw: cw, sh: ch, scale,
     };
   }
