@@ -165,7 +165,7 @@
 <header>
   <h1><em>Kris</em> Collage</h1>
   <span>相片拼貼 · 原畫質輸出</span>
-  <span class="ver">Kris20260702_v5</span>
+  <span class="ver">Kris20260702_v6</span>
 </header>
 
 <div class="layout">
@@ -273,6 +273,10 @@
       <div class="row" id="rowSwapColor" style="display:none">
         <label>膚色校正</label>
         <input type="range" id="swapColor" min="0" max="1" step="0.05" value="0.7">
+      </div>
+      <div class="row" id="rowSwapDemo" style="display:none">
+        <label>示範</label>
+        <button type="button" class="btn ghost" id="loadDemo" style="flex:1;padding:8px 10px;font-size:13px">載入範例（愛因斯坦 × 特斯拉）</button>
       </div>
       <div class="note" id="photoNote"></div>
     </div>
@@ -1141,6 +1145,7 @@
     show('rowFrameWidth', m === 'seetake');
     show('rowSwapFeather', m === 'faceswap');
     show('rowSwapColor', m === 'faceswap');
+    show('rowSwapDemo', m === 'faceswap');
     show('textGroupDefault', m !== 'seetake' && m !== 'faceswap');
     show('textGroupSee', m === 'seetake');
     document.getElementById('uploadsGrid').classList.toggle('three', m === 'standout');
@@ -1186,6 +1191,29 @@
   wire('frameWidth', v => state.frameWidth = parseFloat(v));
   wire('swapFeather', v => { state.swapFeather = parseFloat(v); if (state.mode === 'faceswap') requestFaceSwap(); });
   wire('swapColor', v => { state.swapColor = parseFloat(v); if (state.mode === 'faceswap') requestFaceSwap(); });
+
+  // demo: load two bundled public-domain portraits (historical scientists)
+  document.getElementById('loadDemo').addEventListener('click', async () => {
+    const btn = document.getElementById('loadDemo');
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = '載入範例中…';
+    try {
+      const load = async (url) => {
+        const blob = await (await fetch(url)).blob();
+        const u = URL.createObjectURL(blob);
+        const img = new Image();
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = u; });
+        return { img, u };
+      };
+      const a = await load('demo/face_a.jpg');
+      const b = await load('demo/face_b.jpg');
+      setImage('faceBase', a.img, a.u);
+      setImage('faceSrc', b.img, b.u);
+    } catch (e) {
+      alert('載入範例失敗，請確認網路連線後再試');
+    }
+    btn.disabled = false; btn.textContent = label;
+  });
   wire('txtSee', v => state.text.see = v);
   wire('txtTake', v => state.text.take = v);
   wire('seeSize', v => state.text.seeSize = parseFloat(v));
